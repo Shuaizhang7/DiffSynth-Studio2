@@ -196,6 +196,7 @@ class WanVideoPipeline(BasePipeline):
         camera_control_direction: Optional[Literal["Left", "Right", "Up", "Down", "LeftUp", "LeftDown", "RightUp", "RightDown"]] = None,
         camera_control_speed: Optional[float] = 1/54,
         camera_control_origin: Optional[tuple] = (0, 0.532139961, 0.946026558, 0.5, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0),
+        camera_control_pose_file: Optional[str] = None,
         # VACE
         vace_video: Optional[list[Image.Image]] = None,
         vace_video_mask: Optional[Image.Image] = None,
@@ -262,7 +263,7 @@ class WanVideoPipeline(BasePipeline):
             "end_image": end_image,
             "input_video": input_video, "denoising_strength": denoising_strength,
             "control_video": control_video, "reference_image": reference_image,
-            "camera_control_direction": camera_control_direction, "camera_control_speed": camera_control_speed, "camera_control_origin": camera_control_origin,
+            "camera_control_direction": camera_control_direction, "camera_control_speed": camera_control_speed, "camera_control_origin": camera_control_origin, "camera_control_pose_file": camera_control_pose_file,
             "vace_video": vace_video, "vace_video_mask": vace_video_mask, "vace_reference_image": vace_reference_image, "vace_scale": vace_scale,
             "seed": seed, "rand_device": rand_device,
             "height": height, "width": width, "num_frames": num_frames,
@@ -550,17 +551,19 @@ class WanVideoUnit_FunReference(PipelineUnit):
 class WanVideoUnit_FunCameraControl(PipelineUnit):
     def __init__(self):
         super().__init__(
-            input_params=("height", "width", "num_frames", "camera_control_direction", "camera_control_speed", "camera_control_origin", "latents", "input_image", "tiled", "tile_size", "tile_stride"),
+            input_params=("height", "width", "num_frames", "camera_control_direction", "camera_control_speed", "camera_control_origin", "camera_control_pose_file", "latents", "input_image", "tiled", "tile_size", "tile_stride"),
             output_params=("control_camera_latents_input", "y"),
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, height, width, num_frames, camera_control_direction, camera_control_speed, camera_control_origin, latents, input_image, tiled, tile_size, tile_stride):
-        if camera_control_direction is None:
+    def process(self, pipe: WanVideoPipeline, height, width, num_frames, camera_control_direction, camera_control_speed, camera_control_origin, camera_control_pose_file, latents, input_image, tiled, tile_size, tile_stride):
+        if camera_control_direction is None and camera_control_pose_file is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
         camera_control_plucker_embedding = pipe.dit.control_adapter.process_camera_coordinates(
-            camera_control_direction, num_frames, height, width, camera_control_speed, camera_control_origin)
+            direction=camera_control_direction, length=num_frames, height=height, width=width,
+            speed=camera_control_speed, origin=camera_control_origin,
+            pose_file_path=camera_control_pose_file, num_frames=num_frames)
         
         control_camera_video = camera_control_plucker_embedding[:num_frames].permute([3, 0, 1, 2]).unsqueeze(0)
         control_camera_latents = torch.concat(

@@ -61,3 +61,40 @@ coordinates = generate_camera_coordinates(direction="Left", length=16, speed=1/5
 # 新方式（从 REALESTATE10K 文件读取）
 coordinates = generate_camera_coordinates(pose_file_path="/path/to/pose.txt", num_frames=16)
 ```
+
+---
+
+### 步骤3：修改推理脚本和 Pipeline 支持位姿文件
+
+**修改内容：**
+
+1. **修改 `SimpleAdapter.process_camera_coordinates`** ([wan_video_camera_controller.py:46-84](diffsynth/models/wan_video_camera_controller.py#L46-L84))
+   - 新增 `pose_file_path` 和 `num_frames` 参数
+   - 当 `pose_file_path` 不为空时，从文件读取位姿
+
+2. **修改 `WanVideoUnit_FunCameraControl`** ([wan_video.py:550-565](diffsynth/pipelines/wan_video.py#L550-L565))
+   - 添加 `camera_control_pose_file` 到 `input_params`
+   - 修改 `process` 方法支持从文件读取
+
+3. **修改 `WanVideoPipeline.__call__`** ([wan_video.py:195-199](diffsynth/pipelines/wan_video.py#L195-L199))
+   - 新增 `camera_control_pose_file` 参数
+
+4. **修改推理脚本** ([Wan2.2-Fun-A14B-Control-Camera.py:36-43](examples/wanvideo/model_inference/Wan2.2-Fun-A14B-Control-Camera.py#L36-L43))
+   - 添加使用位姿文件的示例
+
+**使用方式：**
+```python
+# 基于方向（原有方式）
+video = pipe(
+    prompt="...",
+    input_image=input_image,
+    camera_control_direction="Left", camera_control_speed=0.01,
+)
+
+# 从 REALESTATE10K 位姿文件读取
+video = pipe(
+    prompt="...",
+    input_image=input_image,
+    camera_control_pose_file="/path/to/pose.txt",
+)
+```

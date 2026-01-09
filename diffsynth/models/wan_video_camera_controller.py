@@ -45,17 +45,42 @@ class SimpleAdapter(nn.Module):
     
     def process_camera_coordinates(
         self,
-        direction: Literal["Left", "Right", "Up", "Down", "LeftUp", "LeftDown", "RightUp", "RightDown"],
-        length: int,
-        height: int,
-        width: int,
+        direction: Literal["Left", "Right", "Up", "Down", "LeftUp", "LeftDown", "RightUp", "RightDown"] = None,
+        length: int = None,
+        height: int = None,
+        width: int = None,
         speed: float = 1/54,
-        origin=(0, 0.532139961, 0.946026558, 0.5, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0)
+        origin=(0, 0.532139961, 0.946026558, 0.5, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0),
+        pose_file_path: str = None,
+        num_frames: int = None,
     ):
-        if origin is None:
-            origin = (0, 0.532139961, 0.946026558, 0.5, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0)
-        coordinates = generate_camera_coordinates(direction, length, speed, origin)
-        plucker_embedding = process_pose_file(coordinates, width, height)
+        """Generate or load camera coordinates and convert to Plucker embedding.
+
+        Args:
+            direction: Direction of camera movement (Left/Right/Up/Down/In/Out).
+            length: Number of frames to generate.
+            height: Output image height.
+            width: Output image width.
+            speed: Movement speed per frame.
+            origin: Starting camera pose (19-element tuple/list).
+            pose_file_path: Path to REALESTATE10K pose file. If provided, reads from file.
+            num_frames: Number of frames to read from pose file.
+
+        Returns:
+            Plucker embedding tensor of shape [num_frames, height, width, 6]
+        """
+        if pose_file_path is not None:
+            # Read from REALESTATE10K pose file
+            coordinates = generate_camera_coordinates(pose_file_path=pose_file_path, num_frames=num_frames)
+            plucker_embedding = process_pose_file(coordinates, width, height)
+        else:
+            # Original direction-based generation
+            if direction is None or length is None or height is None or width is None:
+                raise ValueError("direction, length, height, and width must be provided if pose_file_path is not set")
+            if origin is None:
+                origin = (0, 0.532139961, 0.946026558, 0.5, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0)
+            coordinates = generate_camera_coordinates(direction, length, speed, origin)
+            plucker_embedding = process_pose_file(coordinates, width, height)
         return plucker_embedding
         
     
