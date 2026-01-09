@@ -83,7 +83,13 @@ class Camera(object):
         self.fy = fy
         self.cx = cx
         self.cy = cy
-        w2c_mat = np.array(entry[7:]).reshape(3, 4)
+        # Support both 19-element (original) and 17-element (REALESTATE10K) formats
+        # 19-element: [timestamp, fx, fy, cx, cy, ?, ?, w2c...] - w2c starts at index 7
+        # 17-element: [timestamp, fx, fy, cx, cy, w2c...] - w2c starts at index 5
+        if len(entry) == 19:
+            w2c_mat = np.array(entry[7:]).reshape(3, 4)
+        else:
+            w2c_mat = np.array(entry[5:]).reshape(3, 4)
         w2c_mat_4x4 = np.eye(4)
         w2c_mat_4x4[:3, :] = w2c_mat
         self.w2c_mat = w2c_mat_4x4
@@ -182,11 +188,34 @@ def process_pose_file(cam_params, width=672, height=384, original_pose_width=128
 
 
 def generate_camera_coordinates(
-    direction: Literal["Left", "Right", "Up", "Down", "LeftUp", "LeftDown", "RightUp", "RightDown", "In", "Out"],
-    length: int,
+    direction: Literal["Left", "Right", "Up", "Down", "LeftUp", "LeftDown", "RightUp", "RightDown", "In", "Out"] = None,
+    length: int = None,
     speed: float = 1/54,
-    origin=(0, 0.532139961, 0.946026558, 0.5, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0)
+    origin=(0, 0.532139961, 0.946026558, 0.5, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0),
+    pose_file_path: str = None,
+    num_frames: int = None,
 ):
+    """Generate camera coordinate sequence.
+
+    Args:
+        direction: Direction of camera movement (Left/Right/Up/Down/In/Out).
+        length: Number of frames to generate.
+        speed: Movement speed per frame.
+        origin: Starting camera pose (19-element tuple/list).
+        pose_file_path: Path to REALESTATE10K pose file. If provided, reads from file instead of generating.
+        num_frames: Number of frames to read from pose file (default: all available frames).
+
+    Returns:
+        List of camera coordinates, each is a list of 19 elements.
+        If reading from file, returns the original format (17 elements per pose).
+    """
+    if pose_file_path is not None:
+        # Read camera poses from REALESTATE10K format file
+        return load_camera_poses_from_file(pose_file_path, num_frames)
+
+    # Original direction-based generation
+    if direction is None or length is None:
+        raise ValueError("direction and length must be provided if pose_file_path is not set")
     coordinates = [list(origin)]
     while len(coordinates) < length:
         coor = coordinates[-1].copy()
@@ -204,3 +233,29 @@ def generate_camera_coordinates(
             coor[18] += speed
         coordinates.append(coor)
     return coordinates
+
+
+def load_camera_poses_from_file(pose_file_path: str, num_frames: int = None):
+    """Load camera poses from REALESTATE10K format file.
+
+    Args:
+        pose_file_path: Path to pose file (first line is YouTube URL, rest are poses).
+        num_frames: Number of frames to read (default: all available).
+
+    Returns:
+        List of camera coordinates, each is a list of 17 elements:
+        [timestamp, fx, fy, cx, cy, w2c_row0_x, w2c_row0_y, w2c_row0_z, w2c_row1_x, w2c_row1_y, w2c_row1_z, w2c_row2_x, w2c_row2_y, w2c_row2_z]
+    """
+    with open(pose_file_path, 'r') as f:
+        lines = f.readlines()
+
+    # Skip first line (YouTube URL), parse poses
+    poses = []
+    for line in lines[1:]:
+        values = [float(x) for x in line.strip().split()]
+        poses.append(values)
+
+    if num_frames is not None:
+        poses = poses[:num_frames]
+
+    return poses
