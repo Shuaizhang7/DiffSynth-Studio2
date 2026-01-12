@@ -98,3 +98,33 @@ video = pipe(
     camera_control_pose_file="/path/to/pose.txt",
 )
 ```
+
+
+## 2026/01/12
+
+### 帮我写一个python脚本读取Wan1.3B模型权重
+权重的地址为：https://modelscope.cn/models/PAI/Wan2.1-Fun-V1.1-1.3B-Control/files
+
+**完成状态：已创建推理脚本**
+
+创建了脚本文件：[Wan2.1-Fun-V1.1-1.3B-Control-LoadWeights.py](examples/wanvideo/model_inference/Wan2.1-Fun-V1.1-1.3B-Control-LoadWeights.py)
+
+**脚本功能：**
+1. 从 ModelScope 加载 Wan1.3B-Control 模型权重
+2. 支持配置数据类型（bfloat16）和运行设备
+3. 提供模型组件加载状态检查
+4. 显示模型参数量统计
+
+**使用方法：**
+```python
+from Wan2.1-Fun-V1.1-1.3B-Control-LoadWeights import load_wan_1_3b_model
+
+pipe = load_wan_1_3b_model(torch_dtype=torch.bfloat16, device="cuda")
+```
+
+**模型文件列表：**
+- `diffusion_pytorch_model*.safetensors` - 扩散模型主权重
+- `models_t5_umt5-xxl-enc-bf16.pth` - T5 文本编码器
+- `Wan2.1_VAE.pth` - VAE 模型
+- `models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` - CLIP 图像编码器
+
