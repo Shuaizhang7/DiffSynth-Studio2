@@ -128,3 +128,35 @@ pipe = load_wan_1_3b_model(torch_dtype=torch.bfloat16, device="cuda")
 - `Wan2.1_VAE.pth` - VAE 模型
 - `models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` - CLIP 图像编码器
 
+
+### 目前已经下载好了权重，请按照说明进行推理测试
+
+运行脚本/data2/shuaizhang/DiffSynth-Studio2/examples/wanvideo/model_inference/Wan2.1-Fun-V1.1-1.3B-Control-Camera.py
+
+### 目前已经跑通了基础的脚本，请你根据上面写的内容，将/data2/shuaizhang/DiffSynth-Studio2/examples/wanvideo/model_inference/Wan2.1-Fun-V1.1-1.3B-Control-Camera.py脚本，先备份，再修改为提供camera_control_pose_file控制相机位姿的脚本，camera_control_pose_file的地址为：/data2/shuaizhang/DiffSynth-Studio2/pose/00a5a2af678f37d5.txt
+
+**完成状态：已备份并添加位姿文件测试**
+
+1. **备份文件**：[Wan2.1-Fun-V1.1-1.3B-Control-Camera.py.backup](examples/wanvideo/model_inference/Wan2.1-Fun-V1.1-1.3B-Control-Camera.py.backup)
+
+2. **修改内容**：
+   - 添加了使用 REALESTATE10K 位姿文件的测试用例
+   - 新增 `camera_control_pose_file="pose/00a5a2af678f37d5.txt"` 参数
+   - 输出文件：`video_pose_file_Wan2.1-Fun-V1.1-1.3B-Control-Camera.mp4`
+
+3. **使用方式**：
+   ```python
+   video = pipe(
+       prompt="...",
+       negative_prompt="...",
+       seed=0, tiled=True,
+       input_image=input_image,
+       camera_control_pose_file="pose/00a5a2af678f37d5.txt",
+   )
+   ```
+
+**运行命令**：
+```bash
+cd /data2/shuaizhang/DiffSynth-Studio2
+python examples/wanvideo/model_inference/Wan2.1-Fun-V1.1-1.3B-Control-Camera.py
+```
