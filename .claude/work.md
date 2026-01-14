@@ -160,3 +160,14 @@ pipe = load_wan_1_3b_model(torch_dtype=torch.bfloat16, device="cuda")
 cd /data2/shuaizhang/DiffSynth-Studio2
 python examples/wanvideo/model_inference/Wan2.1-Fun-V1.1-1.3B-Control-Camera.py
 ```
+
+## 2026/01/13
+### 下载样例数据集，地址在https://modelscope.cn/datasets/DiffSynth-Studio/example_video_dataset
+
+
+modelscope download --dataset DiffSynth-Studio/example_video_dataset
+
+### 下载数据完成
+
+
+
