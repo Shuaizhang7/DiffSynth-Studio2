@@ -39,6 +39,7 @@ def launch_training_task(
                 else:
                     loss = model(data)
                 accelerator.backward(loss)
+                accelerator.print(f"Step {model_logger.num_steps}, Loss: {loss.item():.6f}")
                 optimizer.step()
                 model_logger.on_step_end(accelerator, model, save_steps)
                 scheduler.step()
