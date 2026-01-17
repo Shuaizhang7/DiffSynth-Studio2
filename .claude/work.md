@@ -169,5 +169,54 @@ modelscope download --dataset DiffSynth-Studio/example_video_dataset
 
 ### 下载数据完成
 
+## 2026/01/16
 
+目前我完成了模型的训练，但是模型只有训练脚本，在训练过程中没有可视化的验证，我想在训练的过程中，同时隔一段训练验证保存的checkpoint模型。
+
+验证模型的脚本可以参考/data/vepfs/users/shuaizhang/DiffSynth-Studio2/examples/wanvideo/model_inference/Wan2.1-Fun-V1.1-1.3B-Control-Camera.py
+
+原本的训练脚本为：/data/vepfs/users/shuaizhang/DiffSynth-Studio2/examples/wanvideo/model_training/train.py
+
+你可以参考：/data/vepfs/users/shuaizhang/DualCamCtrl/examples/wanvideo/model_training/train_with_accelerate.py
+
+过程比较复杂，在你修改原本的训练脚本时，先备份一下，一步一步来，步骤记录到本文档中
+
+
+## 2026/01/17
+
+### 完成了训练脚本的修改，添加了验证和 checkpoint 保存功能
+
+**完成状态：已修改**
+
+1. **备份文件**：[train.py.backup](examples/wanvideo/model_training/train.py.backup)
+
+2. **修改内容**：
+   - 添加了 `ModelLogger` 类 - 管理 checkpoint 保存和加载
+   - 添加了 `validate()` 方法到 `WanTrainingModule` - 生成验证视频
+   - 添加了验证相关参数到 parser
+   - 重写了训练循环，添加验证逻辑
+
+3. **新增参数**：
+   - `--validate_step`: 每 N 步验证和保存 checkpoint（默认 500）
+   - `--log_step`: 每 N 步打印 loss（默认 10）
+   - `--init_validate`: 训练前是否验证（默认 False）
+   - `--validate_batch`: 验证批次数（默认 1）
+   - `--validation_dataset_metadata_path`: 验证数据集路径
+
+4. **使用方式**：
+   ```bash
+   # 带验证的训练
+   python examples/wanvideo/model_training/train.py \
+       --output_path ./output \
+       --dataset_base_path ./data \
+       --dataset_metadata_path ./metadata/train.json \
+       --validation_dataset_metadata_path ./metadata/val.json \
+       --validate_step 500 \
+       --init_validate \
+       --num_epochs 10
+   ```
+
+5. **输出文件**：
+   - Checkpoint: `output/checkpoint-step-{global_step}/`
+   - 验证视频: `output/validation_results_50_inference_steps/video_{idx}_step_{global_step}.mp4`
 

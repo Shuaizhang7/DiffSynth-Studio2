@@ -11,4 +11,11 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --remove_prefix_in_ckpt "pipe.dit." \
   --output_path "./models/train/Wan2.1-Fun-V1.1-1.3B-Control-Camera_full" \
   --trainable_models "dit" \
-  --extra_inputs "input_image,camera_control_direction,camera_control_speed"
+  --extra_inputs "input_image,camera_control_direction,camera_control_speed" \
+  --validate_step 10 \
+  --log_step 10 \
+  --init_validate \
+  --validate_batch 1 \
+  --validation_dataset_metadata_path data/example_video_dataset/metadata_camera_control.csv \
+  --validate_camera_pose_file "pose/00a5a2af678f37d5.txt" \
+  --validate_num_frames 61
