@@ -1,9 +1,9 @@
 accelerate launch examples/wanvideo/model_training/train.py \
   --dataset_base_path data/example_video_dataset \
   --dataset_metadata_path data/example_video_dataset/metadata_camera_control.csv \
-  --height 480 \
-  --width 720 \
-  --num_frames 61 \
+  --height 512 \
+  --width 512 \
+  --num_frames 41 \
   --dataset_repeat 100 \
   --model_id_with_origin_paths "PAI/Wan2.1-Fun-V1.1-1.3B-Control-Camera:diffusion_pytorch_model*.safetensors,PAI/Wan2.1-Fun-V1.1-1.3B-Control-Camera:models_t5_umt5-xxl-enc-bf16.pth,PAI/Wan2.1-Fun-V1.1-1.3B-Control-Camera:Wan2.1_VAE.pth,PAI/Wan2.1-Fun-V1.1-1.3B-Control-Camera:models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth" \
   --learning_rate 1e-5 \
@@ -17,5 +17,6 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --init_validate \
   --validate_batch 1 \
   --validation_dataset_metadata_path data/example_video_dataset/metadata_camera_control.csv \
-  --validate_camera_pose_file "pose/00a5a2af678f37d5.txt" \
-  --validate_num_frames 61
+  --validate_camera_pose_file "pose/0a3e53b4a9599727.txt" \
+  --validate_num_frames 41 \
+  --validate_save_colormap

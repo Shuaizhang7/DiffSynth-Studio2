@@ -4,6 +4,8 @@ from diffsynth.core import UnifiedDataset
 from diffsynth.core.data.operators import LoadVideo, LoadAudio, ImageCropAndResize, ToAbsolutePath
 from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig
 from diffsynth.diffusion import *
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
@@ -43,6 +45,77 @@ class ModelLogger:
 
 
 class WanTrainingModule(DiffusionTrainingModule):
+    @staticmethod
+    def apply_colormap_to_video(video_tensor, colormap_name="inferno"):
+        """
+        Apply colormap to a grayscale video tensor and convert to RGB video.
+
+        Args:
+            video_tensor: Grayscale video tensor in format (T, H, W) or (T, C, H, W)
+            colormap_name: Name of matplotlib colormap (default: "inferno")
+
+        Returns:
+            RGB video tensor in format (T, H, W, 3) as numpy array
+        """
+        import numpy as np
+        from PIL import Image
+
+        # Get colormap
+        colormap = np.array(cm.get_cmap(colormap_name).colors)
+
+        # Handle PIL Image list format
+        if isinstance(video_tensor, list):
+            # Convert PIL Images to grayscale numpy array (T, H, W)
+            gray_frames = []
+            for frame in video_tensor:
+                if isinstance(frame, Image.Image):
+                    # Convert to grayscale (L mode)
+                    gray_frame = np.array(frame.convert("L"), dtype=np.float32)
+                else:
+                    gray_frame = np.array(frame, dtype=np.float32)
+                gray_frames.append(gray_frame)
+            video_tensor = np.stack(gray_frames, axis=0)
+        elif isinstance(video_tensor, torch.Tensor):
+            video_tensor = video_tensor.cpu().numpy()
+
+        # Normalize to [0, 1]
+        video_min = video_tensor.min()
+        video_max = video_tensor.max()
+        if video_max - video_min > 0:
+            video_norm = (video_tensor - video_min) / (video_max - video_min)
+        else:
+            video_norm = video_tensor - video_min
+
+        # Handle different tensor formats
+        if video_norm.ndim == 4:
+            # (T, C, H, W) -> take first channel if grayscale
+            if video_norm.shape[1] == 1:
+                video_norm = video_norm[:, 0]
+            else:
+                video_norm = video_norm.mean(axis=1)  # Convert to grayscale
+        # elif video_norm.ndim == 3 and video_tensor.ndim == 4:
+        #     # Already handled above
+
+        # video_norm is now (T, H, W) in [0, 1]
+        T, H, W = video_norm.shape
+
+        # Reshape for indexing: (T, H, W) -> (T*H*W,)
+        flat = video_norm.reshape(-1)
+
+        # Clip indices to valid range
+        indices = np.clip((flat * 255).astype(np.int32), 0, 255)
+
+        # Apply colormap
+        colored = colormap[indices]  # (T*H*W, 3)
+
+        # Reshape back to video format: (T, H, W, 3)
+        colored = colored.reshape(T, H, W, 3)
+
+        # Convert to uint8
+        colored = (colored * 255).astype(np.uint8)
+
+        return colored
+
     def __init__(
         self,
         model_paths=None, model_id_with_origin_paths=None,
@@ -235,6 +308,19 @@ class WanTrainingModule(DiffusionTrainingModule):
                 )
                 print(f"Rank {rank} saving video to {predict_save_path}")
                 save_video(videos, predict_save_path, fps=10, quality=5)
+
+                # Save color-mapped version (if enabled)
+                if getattr(args, "validate_save_colormap", False):
+                    colormap_save_path = os.path.join(
+                        save_path,
+                        f"video_pose_{rgb_video_save_num}_step_{global_step}_colormap.mp4",
+                    )
+                    try:
+                        colored_video = self.apply_colormap_to_video(videos, colormap_name="inferno")
+                        save_video(colored_video, colormap_save_path, fps=10, quality=5)
+                        print(f"Rank {rank} saving colormap video to {colormap_save_path}")
+                    except Exception as e:
+                        print(f"Rank {rank} failed to save colormap video: {e}")
             return
 
         # Original validation logic using dataloader
@@ -275,6 +361,19 @@ class WanTrainingModule(DiffusionTrainingModule):
                         )
                         print(f"Rank {rank} saving video to {predict_save_path}")
                         save_video(videos, predict_save_path, fps=10, quality=5)
+
+                        # Save color-mapped version (if enabled)
+                        if getattr(args, "validate_save_colormap", False):
+                            colormap_save_path = os.path.join(
+                                save_path,
+                                f"video_{rgb_video_save_num}_step_{global_step}_colormap.mp4",
+                            )
+                            try:
+                                colored_video = self.apply_colormap_to_video(videos, colormap_name="inferno")
+                                save_video(colored_video, colormap_save_path, fps=10, quality=5)
+                                print(f"Rank {rank} saving colormap video to {colormap_save_path}")
+                            except Exception as e:
+                                print(f"Rank {rank} failed to save colormap video: {e}")
                         rgb_video_save_num += 1
 
 
@@ -295,6 +394,7 @@ def wan_parser():
     parser.add_argument("--validation_dataset_metadata_path", type=str, default=None, help="Path to validation dataset metadata.")
     parser.add_argument("--validate_camera_pose_file", type=str, default=None, help="Path to camera pose file for validation (REALESTATE10K format).")
     parser.add_argument("--validate_num_frames", type=int, default=61, help="Number of frames to generate during validation.")
+    parser.add_argument("--validate_save_colormap", action="store_true", default=False, help="Whether to save colormapped video during validation.")
     return parser
 
 

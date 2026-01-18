@@ -220,3 +220,28 @@ modelscope download --dataset DiffSynth-Studio/example_video_dataset
    - Checkpoint: `output/checkpoint-step-{global_step}/`
    - 验证视频: `output/validation_results_50_inference_steps/video_{idx}_step_{global_step}.mp4`
 
+
+## 20260118
+### 目前验证时可视化出来的是灰度视频，请你帮我增加一个功能，额外保存一个颜色映射后的灰度图视频
+
+参考：
+colormap = np.array(cm.get_cmap("inferno").colors)
+depth_vis = (colormap[depth_norm] * 255).astype(np.uint8) if not grayscale else depth_norm
+
+**完成状态：已添加颜色映射视频保存功能**
+
+1. **备份文件**：[train.py.backup2](examples/wanvideo/model_training/train.py.backup2)
+
+2. **修改内容**：
+   - 添加 matplotlib 导入：`matplotlib.colors`, `matplotlib.cm`
+   - 添加 `apply_colormap_to_video` 静态方法到 `WanTrainingModule`
+   - 修改验证保存逻辑，同时保存原始视频和颜色映射版本
+
+3. **新增 `apply_colormap_to_video` 方法**：
+   - 将灰度视频转换为 RGB 颜色映射视频
+   - 使用 `inferno` colormap
+   - 支持多种输入格式：(T, H, W), (T, C, H, W)
+
+4. **输出文件**：
+   - 原始视频：`video_pose_0_step_500.mp4`
+   - 颜色映射视频：`video_pose_0_step_500_colormap.mp4`
