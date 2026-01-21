@@ -245,3 +245,67 @@ depth_vis = (colormap[depth_norm] * 255).astype(np.uint8) if not grayscale else 
 4. **输出文件**：
    - 原始视频：`video_pose_0_step_500.mp4`
    - 颜色映射视频：`video_pose_0_step_500_colormap.mp4`
+
+
+## 20260121
+### 目前训练的过程中，位姿的控制方式还是通过CSV文件中给定的运动方向提示词，例如"left，right"等。请修改成支持 REALESTATE10K 数据集的格式，即直接输入相机位姿文件进行控制。
+
+**完成状态：已修改为支持 REALESTATE10K 位姿文件格式**
+
+1. **备份文件**：[train.py.backup3](examples/wanvideo/model_training/train.py.backup3)
+
+2. **修改内容**：
+
+   a. **导入相机控制器模块** ([train.py:7-10](examples/wanvideo/model_training/train.py#L7-L10))
+   ```python
+   from diffsynth.models.wan_video_camera_controller import (
+       generate_camera_coordinates,
+       process_pose_file,
+   )
+   ```
+
+   b. **修改 `get_pipeline_inputs` 方法** ([train.py:214-229](examples/wanvideo/model_training/train.py#L214-L229))
+   - 新增对 `pose_path` 字段的支持
+   - 从位姿文件加载相机坐标并转换为 Plucker embedding
+   - 将 plucker embedding 传递给 pipeline
+
+   c. **修改 Pipeline 支持 `camera_control_plucker` 参数** ([wan_video.py:200](diffsynth/pipelines/wan_video.py#L200))
+   - 添加 `camera_control_plucker` 参数到 `__call__` 方法
+   - 修改 `WanVideoUnit_FunCameraControl` 支持预计算的 plucker embedding
+
+3. **数据集格式**：
+   - 新的 CSV 格式使用 `pose_path` 字段指向 REALESTATE10K 格式的位姿文件
+   ```csv
+   video_path,text,num_frames,height,width,flow,pose_path
+   /path/to/video.mp4,Room,33,256,256,1,/path/to/pose.txt
+   ```
+
+4. **使用方式**：
+   ```python
+   # 训练脚本参数
+   --dataset_metadata_path ./metadata/pose_train.csv
+   ```
+
+5. **修改的文件**：
+   - [train.py](examples/wanvideo/model_training/train.py) - 添加位姿文件支持
+   - [wan_video.py](diffsynth/pipelines/wan_video.py) - 添加 camera_control_plucker 参数
+
+**向后兼容**：原有基于 `camera_control_direction` 的训练方式仍然支持，新旧格式可以共存。
+
+### 20260121 (补充)
+#### 验证时推理步数改为30步
+
+**完成状态：已修改**
+
+1. **修改内容**：
+   - 将验证时的推理步数从 50 改为 30
+   - 新增 `--validate_num_inference_steps` 参数，可自定义验证推理步数
+
+2. **使用方式**：
+   ```bash
+   # 默认使用30步
+   python train.py --validate_step 500
+
+   # 自定义验证推理步数
+   python train.py --validate_step 500 --validate_num_inference_steps 50
+   ```

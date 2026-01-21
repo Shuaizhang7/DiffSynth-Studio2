@@ -4,6 +4,11 @@ from diffsynth.core import UnifiedDataset
 from diffsynth.core.data.operators import LoadVideo, LoadAudio, ImageCropAndResize, ToAbsolutePath
 from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig
 from diffsynth.diffusion import *
+from diffsynth.models.wan_video_camera_controller import (
+    generate_camera_coordinates,
+    process_pose_file,
+)
+import numpy as np
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -173,6 +178,9 @@ class WanTrainingModule(DiffusionTrainingModule):
         
     def parse_extra_inputs(self, data, extra_inputs, inputs_shared):
         for extra_input in extra_inputs:
+            # Skip if the field doesn't exist in data (e.g., camera_control_direction when using pose_path)
+            if extra_input not in data:
+                continue
             if extra_input == "input_image":
                 inputs_shared["input_image"] = data["video"][0]
             elif extra_input == "end_image":
@@ -206,6 +214,29 @@ class WanTrainingModule(DiffusionTrainingModule):
             "min_timestep_boundary": self.min_timestep_boundary,
         }
         inputs_shared = self.parse_extra_inputs(data, self.extra_inputs, inputs_shared)
+
+        # Auto-set input_image from video first frame if not already set
+        if "input_image" not in inputs_shared and "video" in data:
+            inputs_shared["input_image"] = data["video"][0]
+
+        # Support REALESTATE10K pose file format
+        if "pose_path" in data and data["pose_path"]:
+            pose_path = data["pose_path"]
+            height = data["video"][0].size[1]
+            width = data["video"][0].size[0]
+            num_frames = len(data["video"])
+
+            # Load camera coordinates from pose file
+            camera_coordinates = generate_camera_coordinates(pose_file_path=pose_path, num_frames=num_frames)
+            # Convert to Plucker embedding
+            plucker_embedding = process_pose_file(camera_coordinates, width, height)
+            # Convert to torch tensor if needed
+            if isinstance(plucker_embedding, np.ndarray):
+                plucker_embedding = torch.from_numpy(plucker_embedding)
+
+            # Store plucker embedding for camera control
+            inputs_shared["camera_control_plucker"] = plucker_embedding
+
         return inputs_shared, inputs_posi, inputs_nega
     
     def forward(self, data, inputs=None):
@@ -230,7 +261,7 @@ class WanTrainingModule(DiffusionTrainingModule):
 
         rank = accelerator.process_index
         world_size = accelerator.num_processes
-        num_inference_steps = 50
+        num_inference_steps = getattr(args, "validate_num_inference_steps", 30)
 
         # Create save path
         save_path = os.path.join(output_path, f"validation_results_{num_inference_steps}_inference_steps")
@@ -249,18 +280,18 @@ class WanTrainingModule(DiffusionTrainingModule):
                         input_image_tensor = batch["input_image"]
                         if isinstance(input_image_tensor, torch.Tensor):
                             input_image_tensor = input_image_tensor[0] if input_image_tensor.dim() > 3 else input_image_tensor
-                        print(f"[DEBUG] Found input_image, shape: {input_image_tensor.shape}")
+                        #print(f"[DEBUG] Found input_image, shape: {input_image_tensor.shape}")
                         break
                     # If no input_image, try to extract from first frame of video
                     if input_image_tensor is None and isinstance(batch, dict) and "video" in batch:
                         input_video = batch["video"]
-                        print(f"[DEBUG] Found video, type: {type(input_video)}")
+                        #print(f"[DEBUG] Found video, type: {type(input_video)}")
                         if isinstance(input_video, list) and len(input_video) > 0:
                             # LoadVideo returns list of PIL Images
                             input_image = input_video[0]  # Take first frame as PIL Image
-                            print(f"[DEBUG] Using first frame from video list, type: {type(input_image)}")
+                            #print(f"[DEBUG] Using first frame from video list, type: {type(input_image)}")
                         elif isinstance(input_video, torch.Tensor):
-                            print(f"[DEBUG] Video tensor shape: {input_video.shape}")
+                            #print(f"[DEBUG] Video tensor shape: {input_video.shape}")
                             if input_video.dim() == 5:
                                 # (B, C, T, H, W) -> take first frame
                                 input_image_tensor = input_video[0, :, 0, :, :]
@@ -394,6 +425,7 @@ def wan_parser():
     parser.add_argument("--validation_dataset_metadata_path", type=str, default=None, help="Path to validation dataset metadata.")
     parser.add_argument("--validate_camera_pose_file", type=str, default=None, help="Path to camera pose file for validation (REALESTATE10K format).")
     parser.add_argument("--validate_num_frames", type=int, default=61, help="Number of frames to generate during validation.")
+    parser.add_argument("--validate_num_inference_steps", type=int, default=30, help="Number of inference steps during validation (default: 30).")
     parser.add_argument("--validate_save_colormap", action="store_true", default=False, help="Whether to save colormapped video during validation.")
     return parser
 
