@@ -254,22 +254,85 @@ class WanTrainingModule(DiffusionTrainingModule):
         args,
         test_dataloader=None,
         output_path=None,
-        validate_batch=1,
     ):
         """Validate model by generating sample videos and computing metrics."""
         from diffsynth.utils.data import save_video
+        from PIL import Image
 
         rank = accelerator.process_index
         world_size = accelerator.num_processes
         num_inference_steps = getattr(args, "validate_num_inference_steps", 30)
+        height = getattr(args, "height", 480)
+        width = getattr(args, "width", 832)
+        validate_num_frames = getattr(args, "validate_num_frames", 61)
 
         # Create save path
         save_path = os.path.join(output_path, f"validation_results_{num_inference_steps}_inference_steps")
         os.makedirs(save_path, exist_ok=True)
 
-        # If using camera pose file for validation
+        # If using validation_dataset_metadata_path with pose files
+        if getattr(args, "validation_dataset_metadata_path", None) and test_dataloader is not None:
+            accelerator.print(f"Validating with {getattr(args, 'validation_dataset_metadata_path', 'Unknown')}...")
+            rgb_video_save_num = rank
+            total_validated = 0
+
+            for idx, batch in enumerate(test_dataloader):
+                # Multi-GPU: distribute samples across ranks
+                if world_size > 1 and idx % world_size != rank:
+                    continue
+
+                with torch.no_grad():
+                    # Get input data and process camera pose
+                    input_data, inputs_posi, inputs_nega = self.get_pipeline_inputs(batch)
+                    input_data = self.transfer_data_to_device(input_data, self.pipe.device, self.pipe.torch_dtype)
+
+                    # Get plucker embedding from pose_path if available
+                    camera_control_plucker = input_data.get("camera_control_plucker")
+
+                    # Generate video using pipeline with pose file
+                    videos = self.pipe(
+                        prompt="",
+                        negative_prompt="",
+                        input_image=input_data.get("input_image"),
+                        input_video=input_data.get("input_video"),
+                        height=input_data.get("height", height),
+                        width=input_data.get("width", width),
+                        num_frames=input_data.get("num_frames", validate_num_frames),
+                        num_inference_steps=num_inference_steps,
+                        tiled=True,
+                        seed=0,
+                        camera_control_plucker=camera_control_plucker,
+                    )
+
+                    # Save generated video
+                    if videos is not None:
+                        predict_save_path = os.path.join(
+                            save_path,
+                            f"video_pose_{rgb_video_save_num}_step_{global_step}.mp4",
+                        )
+                        print(f"Rank {rank} saving video to {predict_save_path}")
+                        save_video(videos, predict_save_path, fps=10, quality=5)
+
+                        # Save color-mapped version (if enabled)
+                        if getattr(args, "validate_save_colormap", False):
+                            colormap_save_path = os.path.join(
+                                save_path,
+                                f"video_pose_{rgb_video_save_num}_step_{global_step}_colormap.mp4",
+                            )
+                            try:
+                                colored_video = self.apply_colormap_to_video(videos, colormap_name="inferno")
+                                save_video(colored_video, colormap_save_path, fps=10, quality=5)
+                                print(f"Rank {rank} saving colormap video to {colormap_save_path}")
+                            except Exception as e:
+                                print(f"Rank {rank} failed to save colormap video: {e}")
+                        rgb_video_save_num += 1
+                        total_validated += 1
+
+            accelerator.print(f"Rank {rank} validated {total_validated} samples.")
+            return
+
+        # If using single camera pose file for validation
         if getattr(args, "validate_camera_pose_file", None):
-            from PIL import Image
             # Use a default input image if available from validation dataloader
             input_image = None
             input_image_tensor = None
@@ -280,36 +343,26 @@ class WanTrainingModule(DiffusionTrainingModule):
                         input_image_tensor = batch["input_image"]
                         if isinstance(input_image_tensor, torch.Tensor):
                             input_image_tensor = input_image_tensor[0] if input_image_tensor.dim() > 3 else input_image_tensor
-                        #print(f"[DEBUG] Found input_image, shape: {input_image_tensor.shape}")
                         break
                     # If no input_image, try to extract from first frame of video
                     if input_image_tensor is None and isinstance(batch, dict) and "video" in batch:
                         input_video = batch["video"]
-                        #print(f"[DEBUG] Found video, type: {type(input_video)}")
                         if isinstance(input_video, list) and len(input_video) > 0:
-                            # LoadVideo returns list of PIL Images
-                            input_image = input_video[0]  # Take first frame as PIL Image
-                            #print(f"[DEBUG] Using first frame from video list, type: {type(input_image)}")
+                            input_image = input_video[0]
                         elif isinstance(input_video, torch.Tensor):
-                            #print(f"[DEBUG] Video tensor shape: {input_video.shape}")
                             if input_video.dim() == 5:
-                                # (B, C, T, H, W) -> take first frame
                                 input_image_tensor = input_video[0, :, 0, :, :]
                             elif input_video.dim() == 4:
                                 if input_video.shape[1] == 3:
                                     input_image_tensor = input_video[0]
                                 else:
                                     input_image_tensor = input_video[0, 0]
-                            if input_image_tensor is not None:
-                                print(f"[DEBUG] Extracted input_image tensor, shape: {input_image_tensor.shape}")
 
             if input_image_tensor is None and input_image is None:
-                # Create a dummy image if no input available
-                input_image_tensor = torch.zeros(3, args.height, args.width)
+                input_image_tensor = torch.zeros(3, height, width)
 
             # Convert tensor to PIL Image for pipeline
             if input_image_tensor is not None and isinstance(input_image_tensor, torch.Tensor):
-                # CHW -> HWC -> PIL Image
                 input_image_tensor = input_image_tensor.cpu().float()
                 if input_image_tensor.dim() == 3:
                     input_image_tensor = input_image_tensor.permute(1, 2, 0)
@@ -323,9 +376,9 @@ class WanTrainingModule(DiffusionTrainingModule):
                     prompt="",
                     negative_prompt="",
                     input_image=input_image,
-                    height=args.height,
-                    width=args.width,
-                    num_frames=getattr(args, "validate_num_frames", 61),
+                    height=height,
+                    width=width,
+                    num_frames=validate_num_frames,
                     num_inference_steps=num_inference_steps,
                     tiled=True,
                     seed=0,
@@ -358,16 +411,16 @@ class WanTrainingModule(DiffusionTrainingModule):
         assert test_dataloader is not None, "Test dataloader must be provided for validation."
 
         for num_inference_step in [num_inference_steps]:
-            rgb_video_save_num = rank * args.batch_size
+            rgb_video_save_num = rank * getattr(args, "batch_size", 1)
+            total_validated = 0
 
             for idx, batch in enumerate(test_dataloader):
-                if idx >= validate_batch:
-                    break
-                if idx != 0:
-                    rgb_video_save_num += (world_size - 1) * args.batch_size
+                # Multi-GPU: distribute samples across ranks
+                if world_size > 1 and idx % world_size != rank:
+                    continue
 
                 with torch.no_grad():
-                    input_data = self.get_pipeline_inputs(batch)
+                    input_data, inputs_posi, inputs_nega = self.get_pipeline_inputs(batch)
                     input_data = self.transfer_data_to_device(input_data, self.pipe.device, self.pipe.torch_dtype)
 
                     # Generate video using pipeline
@@ -376,9 +429,9 @@ class WanTrainingModule(DiffusionTrainingModule):
                         negative_prompt=[""] * len(input_data.get("prompt", [""])),
                         input_image=input_data.get("input_image"),
                         input_video=input_data.get("input_video"),
-                        height=input_data.get("height"),
-                        width=input_data.get("width"),
-                        num_frames=input_data.get("num_frames"),
+                        height=input_data.get("height", height),
+                        width=input_data.get("width", width),
+                        num_frames=input_data.get("num_frames", validate_num_frames),
                         num_inference_steps=num_inference_step,
                         tiled=True,
                         seed=0,
@@ -406,6 +459,9 @@ class WanTrainingModule(DiffusionTrainingModule):
                             except Exception as e:
                                 print(f"Rank {rank} failed to save colormap video: {e}")
                         rgb_video_save_num += 1
+                        total_validated += 1
+
+            accelerator.print(f"Rank {rank} validated {total_validated} samples.")
 
 
 def wan_parser():
@@ -421,7 +477,6 @@ def wan_parser():
     parser.add_argument("--validate_step", type=int, default=500, help="Validate and save checkpoint every N steps.")
     parser.add_argument("--log_step", type=int, default=10, help="Log loss every N steps.")
     parser.add_argument("--init_validate", action="store_true", default=False, help="Whether to validate before starting training.")
-    parser.add_argument("--validate_batch", type=int, default=1, help="Number of batches to validate.")
     parser.add_argument("--validation_dataset_metadata_path", type=str, default=None, help="Path to validation dataset metadata.")
     parser.add_argument("--validate_camera_pose_file", type=str, default=None, help="Path to camera pose file for validation (REALESTATE10K format).")
     parser.add_argument("--validate_num_frames", type=int, default=61, help="Number of frames to generate during validation.")
@@ -518,7 +573,7 @@ if __name__ == "__main__":
     )
 
     # Custom training loop with validation
-    optimizer = torch.optim.AdamW(model.trainable_modules(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(accelerator.unwrap_model(model).trainable_modules(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer)
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -536,17 +591,16 @@ if __name__ == "__main__":
     # Initial validation
     if args.init_validate and (val_dataloader is not None or args.validate_camera_pose_file is not None):
         accelerator.print("Running initial validation...")
-        model.pipe.dit.eval()
-        model.validate(
+        accelerator.unwrap_model(model).pipe.dit.eval()
+        accelerator.unwrap_model(model).validate(
             accelerator=accelerator,
             global_step=global_step,
             args=args,
             test_dataloader=val_dataloader,
             output_path=model_logger.output_path,
-            validate_batch=args.validate_batch,
         )
-        model.pipe.scheduler.set_timesteps(1000, training=True)
-        model.pipe.dit.train()
+        accelerator.unwrap_model(model).pipe.scheduler.set_timesteps(1000, training=True)
+        accelerator.unwrap_model(model).pipe.dit.train()
         accelerator.wait_for_everyone()
 
     accumulate_loss = 0.0
@@ -568,7 +622,7 @@ if __name__ == "__main__":
                 accelerator.backward(loss)
 
                 if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.trainable_modules(), max_norm=1.0)
+                    accelerator.clip_grad_norm_(accelerator.unwrap_model(model).trainable_modules(), max_norm=1.0)
                     optimizer.step()
                     optimizer.zero_grad()
                     scheduler.step()
@@ -596,17 +650,16 @@ if __name__ == "__main__":
 
                         # Run validation
                         if val_dataloader is not None or args.validate_camera_pose_file is not None:
-                            model.pipe.dit.eval()
-                            model.validate(
+                            accelerator.unwrap_model(model).pipe.dit.eval()
+                            accelerator.unwrap_model(model).validate(
                                 accelerator=accelerator,
                                 global_step=global_step,
                                 args=args,
                                 test_dataloader=val_dataloader,
                                 output_path=model_logger.output_path,
-                                validate_batch=args.validate_batch,
                             )
-                            model.pipe.scheduler.set_timesteps(1000, training=True)
-                            model.pipe.dit.train()
+                            accelerator.unwrap_model(model).pipe.scheduler.set_timesteps(1000, training=True)
+                            accelerator.unwrap_model(model).pipe.dit.train()
                         accelerator.wait_for_everyone()
 
     accelerator.print("Training completed!")
